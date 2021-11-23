@@ -3,3 +3,178 @@ title: "Bayesian workflow for disease transmission modeling in Stan"
 output: html_notebook
 ---
 
+# 1 Simple SIR 
+
+## Data
+
+In this example, we examine an outbreak of influenza A (H1N1) in 1978 at a British boarding school. 
+The data consists of the daily number of students in bed, spanning over a time interval of 14 days. 
+There were 763 male students who were mostly full boarders and 512 of them became ill. 
+The outbreak lasted from the 22nd of January to the 4th of February. 
+It is reported that one infected boy started the epidemic, which spread rapidly in the relatively closed community of the boarding school. 
+この例では，1978年にイギリスの寄宿学校で発生したインフルエンザA（H1N1）を調べます．
+このデータは、14日間の期間中、毎日の入院患者数を表しています。
+763人の男子生徒はほとんどが寮生で、そのうち512人が病気になりました。
+集団発生は1月22日から2月4日まで続きました。
+一人の男子生徒が感染したことがきっかけとなり、寄宿学校という比較的閉鎖的なコミュニティの中で急速に広まったと報告されています。
+
+The data are freely available in the R package outbreaks, maintained as part of the [R Epidemics Consortium](http://www.repidemicsconsortium.org).
+
+
+```{r, message=FALSE}
+library(outbreaks)
+library(tidyverse)
+```
+
+```{r}
+d = influenza_england_1978_school
+```
+
+```{r}
+theme_set(theme_bw())
+ggplot(data = d ) + 
+  geom_point(mapping = aes(x = date, y = in_bed)) + 
+  labs(y = "Number of students in bed")
+```
+## Mathematical transmission model 数理的伝播モデル
+The Susceptible-Infected-Recovered (SIR) model splits the population in three time-dependent compartments: the susceptible, the infected (and infectious), and the recovered (and not infectious) compartments. When a susceptible individual comes into contact with an infectious individual, the former can become infected for some time, and then recover and become immune.
+The dynamics can be summarized graphically:
+
+SIR（Susceptible-Infected-Recovered）モデルでは、集団を時間に依存した3つのコンパートメント、すなわち、感受性のあるコンパートメント、感染した（感染力のある）コンパートメント、回復した（感染力のない）コンパートメントに分けます。感受性の高い個体が感染した個体と接触すると、感染した個体はしばらくの間感染した後、回復して免疫を獲得します。
+このダイナミクスを図式化すると次のようになります。
+
+![図1](pictures/SIR_tikz.png)
+The temporal dynamics of the sizes of each of the compartments are governed by the following  system of ODEs:
+各コンパートメントのサイズの時間的なダイナミクスは、以下のODEシステムによって支配されます。
+
+$$
+\begin{aligned}
+ \frac{dS}{dt} &= -\beta  S \frac{I}{N}\\
+ \frac{dI}{dt} &= \beta  S  \frac{I}{N} - \gamma  I \\
+ \frac{dR}{dt} &= \gamma I
+\end{aligned}
+$$
+where
+時点変数
+* S(t) is the number of people susceptible to becoming infected (no　immunity),
+
+* I(t) is the number of people currently infected (and infectious),
+
+* R(t) is the number of recovered people (we assume they remain immune indefinitely),
+
+定数
+* beta is the constant rate of infectious contact between people,
+
+* gamma the constant recovery rate of infected individuals.
+
+Let's give some intuition behind these ODEs. 
+The proportion of infected people among the population is 
+
+総人口: N=S+I+R
+
+$$\frac{I}{N}$$
+
+At each time step, given uniform contacts, the probability for a susceptible person to become infected is thus 
+
+
+$$\beta\frac{I}{N}$$
+, with beta the average number of contacts per person per time, multiplied by the probability of disease transmission when a susceptible and an infected subject come in contact. Hence, at each time step, 
+βは一人当たりの時間当たりの平均接触回数で、これに感受性のある対象者と感染した対象者が接触したときに病気が感染する確率を掛けたものです。
+
+$$\beta  S \frac{I}{N}$$ 
+
+susceptible individuals become infected,  meaning 
+
+$$\beta  S \frac{I}{N}$$ 
+
+people leave the S compartment and 
+
+$$\beta  S \frac{I}{N}$$ 
+
+people enter the I compartment. Similarly, the recovery of an infected individual is taking place at rate gamma, and thus the number of infected individuals decreases with speed gamma I  while the number of recovered grows at the same speed.
+
+The above model holds under several assumptions: 
+
+* births and deaths are not contributing to the dynamics and the total population N=S+I+R remains constant, 
+* recovered individuals do not become susceptible again over time,
+
+* the infection rate beta and recovery rate gamma are constant, 
+
+* the population is homogeneous, 
+
+* individuals meet any other individual uniformly at random (homogeneous mixing)
+上記のモデルは、いくつかの仮定の下で成立します。
+
+* 出生と死亡はダイナミクスに寄与せず、総人口N=S+I+Rは一定である。
+* 回復した個体は、時間が経っても再び感染しない。
+
+* 感染率βと回復率γは一定である。
+
+* 集団は均質である。
+
+* 個体は他の個体と一様にランダムに出会う（均一混合）。
+
+and recovery time follows an exponential distribution with mean 
+
+$$\frac{1}{\gamma}$$
+* replacing the integer number of people in each compartement by a continuous approximation is legitimate (the population is big enough)
+
+* 各コンパートメントの整数の人数を連続的な近似値に置き換えることは正当である（人口は十分に多い）。
+
+In case of boarding school data, the spread of the disease has started with one infected individual which leads to the initial conditions I(0) = 1, S(0) = N-1, R(0) = 0
+
+## Statistical model 統計モデル
+
+We now introduce a **sampling distribution**(also termed **likelihood**)
+ここで、_サンプリング分布_（_尤度_とも呼ばれる）を紹介します。
+
+$$ 
+  p(\mathcal D \mid \theta) 
+$$
+which tells us, given model parameters theta, how to generate data D.
+Inference reverse-engineers the data generating process
+and asks: "given a model and observations, D,
+what are plausible parameter values?"
+In a Bayesian framework, the set of plausible values is characterized by
+the posterior distribution,
+これは、モデルのパラメータθが与えられたときに、どのようにデータDを生成するかを示すものです。
+推論は、データ生成プロセスをリバースエンジニアリングして
+と問いかけます。推論は、データ生成プロセスを逆行させ、「モデルと観測値Dが与えられたとき、もっともらしいパラメータ値は何か？
+妥当なパラメータ値は何か？"
+ベイズの枠組みでは、もっともらしい値のセットは、次のように事後分布として特徴づけられます。
+
+$$
+p(\theta \mid \mathcal D).
+$$
+Bayes' rule teaches us that
+
+$$
+  p(\theta \mid \mathcal D) \propto p(\mathcal D \mid \theta) p(\theta)
+$$
+where 
+$$p(\mathcal D \mid \theta)$$ 
+
+is the sampling distribution,
+（上記はサンプル分布）
+
+p(theta) the _prior_ distribution,
+and propto stands for "proportional to".
+
+The prior encodes information about the parameters we have
+before observing the data.
+To summarize, a Bayesian model couples a mathematical model of what we know about the parameters in the form of a prior and a sampling distribution, i.e. a model of the data generating process.
+
+事前情報は，データを観測する前に持っていたパラメータに関する情報を
+データを観測する前に持っているパラメータに関する情報をエンコードします。
+要約すると，ベイジアンモデルは，事前分布とサンプリング分布という形で，パラメータについて知っていることの数学的モデル，すなわち，データ生成プロセスのモデルを結合したものである。
+
+### Sampling distribution
+
+Given transmission parameters and initial conditions, 
+a compartmental model defines a unique solution for each of the compartments, 
+including the number of infected students, I_ODE(t). 
+We want to link this solution to the observed data, i.e the number of students in bed, I_obs(t), at each time point.
+
+伝播パラメータと初期条件が与えられた場合,コンパートメントモデルでは、それぞれのコンパートメントに固有の解が定義されます。
+感染した学生の数I_ODE(t)などです。
+この解を、観測されたデータ、すなわち各時点でのベッドにいる学生の数I_obs(t)にリンクさせたいと思います。
