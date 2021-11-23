@@ -178,3 +178,4 @@ We want to link this solution to the observed data, i.e the number of students i
 伝播パラメータと初期条件が与えられた場合,コンパートメントモデルでは、それぞれのコンパートメントに固有の解が定義されます。
 感染した学生の数I_ODE(t)などです。
 この解を、観測されたデータ、すなわち各時点でのベッドにいる学生の数I_obs(t)にリンクさせたいと思います。
+
