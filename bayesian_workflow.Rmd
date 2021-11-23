@@ -1,0 +1,5 @@
+---
+title: "Bayesian workflow for disease transmission modeling in Stan"
+output: html_notebook
+---
+
